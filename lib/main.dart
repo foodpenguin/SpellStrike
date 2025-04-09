@@ -1,46 +1,138 @@
 import 'package:flutter/material.dart';
 import 'dart:async'; // 用於 Splash Screen 的計時器
+import 'dart:math'; // 用於隨機選擇怪物
 
 void main() {
   runApp(const SpellStrikeApp());
 }
 
+// --- 資料模型 ---
+class MonsterInfo {
+  final String name;
+  final String imagePath;
+  final int level;
+
+  MonsterInfo({required this.name, required this.imagePath, this.level = 1});
+}
+
+// 定義怪物資料
+final Map<String, MonsterInfo> monsters = {
+  'Glumburn': MonsterInfo(
+    name: 'Glumburn (哀焰獸)',
+    imagePath: 'assets/images/monster_1.png',
+    level: 3,
+  ),
+  'Pyrothar': MonsterInfo(
+    name: 'Pyrothar (焰眼咒師)',
+    imagePath: 'assets/images/monster_2.png',
+    level: 5,
+  ),
+  'Muffora': MonsterInfo(
+    name: 'Muffora (巫莓)',
+    imagePath: 'assets/images/monster_3.png',
+    level: 4,
+  ),
+  'Shroomane': MonsterInfo(
+    name: 'Shroomane (絨菇巢)',
+    imagePath: 'assets/images/monster_5.png',
+    level: 6,
+  ),
+};
+
+// --- App 主體 ---
 class SpellStrikeApp extends StatelessWidget {
   const SpellStrikeApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SpellStrike', // 應用程式標題
+      title: 'SpellStrike',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurple, // 你可以換成遊戲的主題色
-          brightness: Brightness.dark, // 可以嘗試暗色主題
+          seedColor: const Color(0xFF4A00E0),
+          brightness: Brightness.dark,
         ),
-        useMaterial3: true, // 建議使用 Material 3
-        // 你可以在這裡定義整個 App 的字體、按鈕樣式等
+        useMaterial3: true,
+        // fontFamily: 'YourMagicFont', // 如果你有添加特殊字體
         textTheme: const TextTheme(
-          bodyMedium: TextStyle(fontSize: 18.0),
-          headlineLarge: TextStyle(fontSize: 48.0, fontWeight: FontWeight.bold),
+          bodyMedium: TextStyle(fontSize: 18.0, color: Colors.white),
+          headlineLarge: TextStyle(
+            fontSize: 36.0,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          headlineMedium: TextStyle(
+            fontSize: 28.0,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+          headlineSmall: TextStyle(
+            fontSize: 22.0,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+          titleLarge: TextStyle(
+            fontSize: 20.0,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          // 可以為怪物名稱定義特殊字體樣式
+          titleMedium: TextStyle(
+            fontSize: 18.0,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF90CAF9),
+            letterSpacing: 1.2,
+          ), // 範例：藍色、稍大字間距
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: true,
+          titleTextStyle: TextStyle(
+            fontSize: 20.0,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-            textStyle: const TextStyle(fontSize: 20),
+            backgroundColor: const Color(0xFF00D2FF), // 亮藍色按鈕
+            foregroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 18),
+            textStyle: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30.0),
+            ),
+            elevation: 4,
           ),
         ),
+        progressIndicatorTheme: ProgressIndicatorThemeData(
+          // 進度條 (血條) 樣式
+          color: Colors.redAccent.shade400, // 血條主要顏色
+          linearTrackColor: Colors.grey.shade800, // 血條背景色
+          linearMinHeight: 18, // 血條高度
+        ),
+        splashColor: const Color(0xFF4A00E0).withOpacity(0.3),
+        scaffoldBackgroundColor: const Color(0xFF1A1A2E),
       ),
-      // 使用命名路由來管理頁面跳轉
-      initialRoute: '/', // 指定起始路由為 SplashScreen
+      debugShowCheckedModeBanner: false,
+      initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),
         '/home': (context) => const HomeScreen(),
         '/topic_selection': (context) => const TopicSelectionScreen(),
-        '/gameplay': (context) => const GameplayScreen(),
+        '/gameplay': (context) {
+          final monsterInfo =
+              ModalRoute.of(context)?.settings.arguments as MonsterInfo?;
+          final defaultMonster = monsters.values.first;
+          return GameplayScreen(monsterInfo: monsterInfo ?? defaultMonster);
+        },
         '/results': (context) => const ResultsScreen(),
+        // '/settings': (context) => const SettingsScreen(),
       },
-      // 如果需要，可以定義一個未知的路由處理頁面
-      // onUnknownRoute: (settings) => MaterialPageRoute(builder: (context) => UnknownScreen()),
     );
   }
 }
@@ -48,7 +140,6 @@ class SpellStrikeApp extends StatelessWidget {
 // --- 1. 起始畫面 (Splash Screen) ---
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
-
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
@@ -57,10 +148,10 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    // 延遲一段時間（例如 3 秒）後跳轉到主頁
     Timer(const Duration(seconds: 3), () {
-      // 使用 pushReplacementNamed 避免用戶可以返回到 Splash Screen
-      Navigator.of(context).pushReplacementNamed('/home');
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
     });
   }
 
@@ -71,16 +162,21 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // 在這裡放你的 Logo 或遊戲名稱
-            // 例如：使用 FlutterLogo 或 Image.asset('assets/logo.png')
-            const FlutterLogo(size: 150), // 暫時用 Flutter Logo 替代
-            const SizedBox(height: 20),
-            Text(
-              'SpellStrike',
-              style: Theme.of(context).textTheme.headlineLarge,
+            Image.asset(
+              'assets/images/logo.png',
+              height: 250,
+              errorBuilder: (context, error, stackTrace) {
+                print('Error loading logo on splash: $error');
+                return Text(
+                  'SpellStrike',
+                  style: Theme.of(context).textTheme.headlineLarge,
+                );
+              },
             ),
-            const SizedBox(height: 20),
-            const CircularProgressIndicator(), // 顯示載入動畫
+            const SizedBox(height: 30),
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.lightBlueAccent),
+            ),
           ],
         ),
       ),
@@ -91,247 +187,571 @@ class _SplashScreenState extends State<SplashScreen> {
 // --- 2. 主頁 (Home Screen) ---
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
-
+  void _showCharacterInteraction(BuildContext context) {
+    /* ... */
+  }
+  void _openSettings(BuildContext context) {
+    /* ... */
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('SpellStrike - 主頁'),
-        automaticallyImplyLeading: false, // 不顯示返回按鈕
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            // 可能會放遊戲 Logo 或主要視覺
-            Text(
-              '歡迎來到 SpellStrike!',
-              style: Theme.of(context).textTheme.headlineMedium,
-              textAlign: TextAlign.center,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/images/home_background.png',
+            fit: BoxFit.cover /* errorBuilder */,
+          ),
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => _showCharacterInteraction(context),
+              child: Container(color: Colors.transparent),
             ),
-            const SizedBox(height: 50),
-            ElevatedButton(
-              onPressed: () {
-                // 跳轉到抽題目類型頁面
-                Navigator.of(context).pushNamed('/topic_selection');
-              },
-              child: const Text('開始遊戲'),
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 20.0),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  height: 240 /* errorBuilder */,
+                ),
+              ),
             ),
-            const SizedBox(height: 20),
-            // 可以添加其他按鈕，例如 設定、排行榜 等
-            // OutlinedButton(
-            //   onPressed: () { /* TODO: Navigate to Settings */ },
-            //   child: const Text('設定'),
-            // ),
-          ],
-        ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 40.0, left: 20, right: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      // TODO: 添加按鈕的功能
+                      print('開始遊戲按鈕被點擊');
+                      Navigator.of(context).pushNamed('/topic_selection');
+                    },
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('開始遊戲'),
+                  ),
+                  const SizedBox(height: 15),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.4),
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      onPressed: () {
+                        // TODO: 添加設定按鈕的功能
+                        print('設定按鈕被點擊');
+                        Navigator.of(context).pushNamed('/settings');
+                      },
+                      icon: const Icon(Icons.settings),
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-// --- 3. 抽題目類型 (Topic Selection Screen) ---
+// --- 3. 抽題目類型 (Topic Selection Screen) - *** 修正 *** ---
 class TopicSelectionScreen extends StatelessWidget {
   const TopicSelectionScreen({super.key});
 
+  MonsterInfo _getMonsterForTopic(String topic) {
+    final monsterKeys = monsters.keys.toList();
+    final random = Random();
+    switch (topic) {
+      case '日常生活':
+        return monsters['Muffora'] ?? monsters.values.first;
+      case '旅遊英語':
+        return monsters['Glumburn'] ?? monsters.values.first;
+      case '商務會話':
+        return monsters['Shroomane'] ?? monsters.values.first;
+      case '奇幻冒險':
+        return monsters['Pyrothar'] ?? monsters.values.first;
+      case '隨機挑戰':
+      default:
+        return monsters[monsterKeys[random.nextInt(monsterKeys.length)]]!;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 假設的題目類型列表
-    final List<String> topics = ['日常生活', '旅遊英語', '商務會話', '隨機挑戰'];
+    final List<String> topics = ['日常生活', '旅遊英語', '商務會話', '奇幻冒險', '隨機挑戰'];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('選擇題目類型')),
+      appBar: AppBar(title: const Text('選擇挑戰主題')),
+      // *** 恢復 Center 的 child 內容 ***
       body: Center(
+        // 讓內容在螢幕中央
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          // 垂直佈局
+          mainAxisAlignment: MainAxisAlignment.center, // 主軸居中 (雖然 Expanded 會填滿)
           children: <Widget>[
-            Text('選擇你想練習的主題', style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 30),
-            // 將題目類型顯示為按鈕列表
+            Padding(
+              // 頂部文字標題
+              padding: const EdgeInsets.symmetric(vertical: 30.0), // 上下間距
+              child: Text(
+                '選擇你想練習的主題',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: Colors.lightBlue[100],
+                ), // 使用主題樣式並微調顏色
+              ),
+            ),
             Expanded(
-              // 使用 Expanded 讓 ListView 填滿剩餘空間
+              // 讓 ListView 填滿剩餘的垂直空間
               child: ListView.builder(
-                itemCount: topics.length,
+                // 建立按鈕列表
+                itemCount: topics.length, // 列表項數量 = 主題數量
                 itemBuilder: (context, index) {
-                  final topic = topics[index];
+                  // 如何建立每個列表項
+                  final topic = topics[index]; // 獲取當前主題文字
                   return Padding(
+                    // 為每個按鈕添加垂直和水平邊距
                     padding: const EdgeInsets.symmetric(
-                      vertical: 8.0,
-                      horizontal: 40.0,
+                      vertical: 10.0,
+                      horizontal: 50.0,
                     ),
                     child: ElevatedButton(
+                      // 每個主題是一個按鈕
                       onPressed: () {
-                        // 跳轉到打怪頁面，可以將選擇的 topic 作為參數傳遞
-                        // Navigator.of(context).pushNamed('/gameplay', arguments: topic);
-                        Navigator.of(context).pushNamed('/gameplay'); // 暫不傳遞參數
+                        // 按下按鈕時的動作
+                        // 根據選中的主題獲取怪物資訊
+                        final selectedMonster = _getMonsterForTopic(topic);
+                        // 導航到遊戲畫面，並將怪物資訊作為參數傳遞
+                        Navigator.of(
+                          context,
+                        ).pushNamed('/gameplay', arguments: selectedMonster);
                       },
-                      child: Text(topic),
+                      child: Text(topic), // 按鈕顯示的文字
                     ),
                   );
                 },
               ),
             ),
+            const SizedBox(height: 20), // 在列表底部增加一些額外空間
           ],
         ),
-      ),
+      ), // *** Center 的 child 結束 ***
     );
   }
 }
 
-// --- 4. 打怪 (Gameplay Screen) ---
+// --- Placeholder for MonsterInfo ---
+// You should have your actual MonsterInfo class defined elsewhere
+// --- End of Placeholder ---
+// --- 4. 打怪 (Gameplay Screen) - *** 全面修改 *** ---
 class GameplayScreen extends StatefulWidget {
-  const GameplayScreen({super.key});
-  // 如果需要接收參數，可以這樣定義：
-  // final String selectedTopic;
-  // const GameplayScreen({super.key, required this.selectedTopic});
+  final MonsterInfo monsterInfo;
+  const GameplayScreen({super.key, required this.monsterInfo});
 
   @override
   State<GameplayScreen> createState() => _GameplayScreenState();
 }
 
 class _GameplayScreenState extends State<GameplayScreen> {
-  // --- 這裡需要狀態來管理 ---
-  String currentSentence = "Please read this example sentence."; // 當前的句子
-  double monsterHealth = 1.0; // 怪物血量 (0.0 ~ 1.0)
-  bool isRecording = false; // 是否正在錄音
-  int score = 0; // 本句得分
-  // TODO: 添加計時器邏輯
+  late MonsterInfo currentMonster;
+  String currentSentence = "Loading sentence...";
+  double monsterHealth = 1.0;
+  bool isRecording = false;
+  int score = 0;
+  // Placeholder for detailed scores
+  int pronunciationScore = 0;
+  int fluencyScore = 0;
+  int accuracyScore = 0; // 可以加一個準確度分數
+
+  @override
+  void initState() {
+    super.initState();
+    currentMonster = widget.monsterInfo;
+    _loadNextSentence();
+  }
 
   void _startRecording() {
-    // TODO: 實現開始錄音的邏輯
+    if (!mounted) return;
     setState(() {
       isRecording = true;
-      // 清除上一句的分數
-      score = 0;
+      score = 0; // Reset scores for new attempt
+      pronunciationScore = 0;
+      fluencyScore = 0;
+      accuracyScore = 0;
     });
     print("開始錄音...");
-    // 模擬錄音和評分過程
-    // 在實際應用中，這裡會觸發語音辨識和評分 API
+    // TODO: Start actual voice recording & processing
+    // Placeholder delay
     Future.delayed(const Duration(seconds: 4), _stopRecordingAndEvaluate);
   }
 
   void _stopRecordingAndEvaluate() {
-    // TODO: 實現停止錄音、呼叫 API、獲取分數、計算傷害的邏輯
+    if (!mounted) return;
+
+    // --- TODO: Replace with actual API call results ---
+    final random = Random();
+    final calculatedPronunciationScore =
+        60 + random.nextInt(41); // Simulate 60-100
+    final calculatedFluencyScore = 70 + random.nextInt(31); // Simulate 70-100
+    final calculatedAccuracyScore = 80 + random.nextInt(21); // Simulate 80-100
+    // Calculate overall score (example: weighted average)
+    final overallScore =
+        ((calculatedPronunciationScore * 0.4) +
+                (calculatedFluencyScore * 0.3) +
+                (calculatedAccuracyScore * 0.3))
+            .round();
+    // --- End of simulation ---
+
+    final damageFactor = 500.0 + (currentMonster.level * 50);
+    final damageDealt = overallScore / damageFactor;
+
     setState(() {
       isRecording = false;
-      // 模擬獲得分數和計算傷害
-      score = (80 + (DateTime.now().second % 21)).toInt(); // 隨機模擬 80-100 分
-      double damage = score / 500.0; // 簡單的傷害轉換邏輯
-      monsterHealth -= damage;
-      if (monsterHealth < 0) monsterHealth = 0;
-      print("錄音結束，得分: $score, 怪物剩餘血量: $monsterHealth");
+      score = overallScore; // Update overall score display
+      pronunciationScore = calculatedPronunciationScore;
+      fluencyScore = calculatedFluencyScore;
+      accuracyScore = calculatedAccuracyScore; // Store detailed scores
 
-      // 檢查怪物是否被打敗
+      monsterHealth -= damageDealt;
+      if (monsterHealth < 0) monsterHealth = 0;
+
+      print(
+        "評分完成 - Overall: $score (P:$pronunciationScore, F:$fluencyScore, A:$accuracyScore), ${currentMonster.name} HP: ${(monsterHealth * 100).toStringAsFixed(0)}%",
+      );
+
+      // TODO: Trigger attack animations based on score (e.g., high score = critical hit)
+      // Example: if (overallScore > 90) { _triggerCriticalHitAnimation(); } else { _triggerNormalHitAnimation(); }
+
       if (monsterHealth <= 0) {
+        print("怪物 ${currentMonster.name} 被擊敗！");
+        // TODO: Trigger monster defeat animation
         _goToResults();
       } else {
-        // 載入下一句 (或重複本句)
+        // TODO: Trigger monster hit animation
         _loadNextSentence();
       }
     });
   }
 
   void _loadNextSentence() {
-    // TODO: 實現從題庫加載下一句的邏輯
+    // TODO: Load actual sentences based on topic/difficulty
+    final sentences = [
+      "Say the word: 'magic'",
+      "Read aloud: 'Abracadabra!'",
+      "Pronounce: 'Wizardry'",
+      "Speak: 'Incantation'",
+      "Try this: 'Mystical Orb'",
+    ];
+    if (!mounted) return;
     setState(() {
-      currentSentence = "This is another example sentence to read aloud.";
-      // 也可以根據需要重置怪物血量或設定新怪物
+      // Reset scores for the new sentence, except the main score display which is handled in startRecording
+      pronunciationScore = 0;
+      fluencyScore = 0;
+      accuracyScore = 0;
+      // Load new sentence
+      currentSentence = sentences[Random().nextInt(sentences.length)];
     });
   }
 
   void _goToResults() {
-    // TODO: 可能需要傳遞最終分數或其他統計數據到結果頁面
-    // Navigator.of(context).pushReplacementNamed('/results', arguments: finalScore);
-    Navigator.of(context).pushReplacementNamed('/results'); // 跳轉到結算頁面
+    // TODO: Pass final results (total score, stats) to results screen
+    if (mounted) {
+      // Example navigation, replace '/results' with your actual route name
+      // Make sure you have a route defined for '/results' in your MaterialApp
+      Navigator.of(context).pushReplacementNamed('/results');
+      // If you don't have named routes setup, use:
+      // Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => ResultsScreen())); // Replace ResultsScreen with your actual results screen widget
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // // 如果需要從路由接收參數：
-    // final selectedTopic = ModalRoute.of(context)!.settings.arguments as String?;
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('戰鬥中！'),
-        // title: Text('戰鬥中！ - ${selectedTopic ?? '未知主題'}'), // 顯示主題
-        automaticallyImplyLeading: false, // 通常戰鬥中不允許返回
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween, // 將元素分散在空間中
-          children: <Widget>[
-            // --- 頂部：怪物狀態 ---
-            Column(
-              children: [
-                Text(
-                  '怪物名稱 (Lv. 5)',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 10),
-                // TODO: 替換成怪物圖片或動畫
-                const Icon(
-                  Icons.adb,
-                  size: 100,
-                  color: Colors.green,
-                ), // 暫用 Android Bot
-                const SizedBox(height: 10),
-                LinearProgressIndicator(
-                  // 怪物血條
-                  value: monsterHealth,
-                  minHeight: 20,
-                  backgroundColor: Colors.grey[700],
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.red),
-                ),
-                Text('${(monsterHealth * 100).toStringAsFixed(0)}%'), // 顯示血量百分比
-              ],
-            ),
+      // AppBar is usually hidden in gameplay for immersion
+      body: Stack(
+        // Use Stack for layering background and UI
+        fit: StackFit.expand,
+        children: [
+          // --- 1. Background Image ---
+          Image.asset(
+            'assets/images/gameplay_background.png', // New background
+            fit: BoxFit.cover, // Cover the entire screen
+            errorBuilder: (context, error, stackTrace) {
+              print('Error loading gameplay background: $error');
+              return Container(
+                color: Theme.of(context).scaffoldBackgroundColor,
+              );
+            },
+          ),
 
-            // --- 中間：句子顯示 ---
-            Container(
-              padding: const EdgeInsets.all(16.0),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey),
-                borderRadius: BorderRadius.circular(8.0),
+          // --- 2. Main Gameplay UI Column ---
+          SafeArea(
+            // Ensure UI elements don't overlap with system areas
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20.0,
+                vertical: 10.0,
               ),
-              child: Text(
-                currentSentence,
-                style: Theme.of(
-                  context,
-                ).textTheme.headlineSmall?.copyWith(fontSize: 28), // 放大字體
-                textAlign: TextAlign.center,
-              ),
-            ),
-
-            // --- 顯示分數 (如果有的話) ---
-            if (score > 0)
-              Text(
-                '得分: $score',
-                style: Theme.of(
-                  context,
-                ).textTheme.headlineMedium?.copyWith(color: Colors.amber),
-              ),
-
-            // --- 底部：錄音控制 ---
-            Column(
-              children: [
-                // TODO: 加入計時器顯示
-                // Text('剩餘時間: 10s', style: TextStyle(fontSize: 18)),
-                const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  onPressed: isRecording ? null : _startRecording, // 錄音中禁用按鈕
-                  icon: Icon(isRecording ? Icons.mic_off : Icons.mic),
-                  label: Text(isRecording ? '正在錄音...' : '按住說話 (或點擊)'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        isRecording ? Colors.redAccent : Colors.blueAccent,
-                    minimumSize: const Size(200, 60), // 較大的按鈕
+              child: Column(
+                // Distribute space: Monster area, Sentence/Score area, Button area
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // --- Top Section: Monster Info ---
+                  Column(
+                    mainAxisSize: MainAxisSize.min, // Take minimum space
+                    children: [
+                      Text(
+                        // Monster Name & Level
+                        '${currentMonster.name} (Lv.${currentMonster.level})',
+                        style: Theme.of(
+                          context,
+                        ).textTheme.titleMedium?.copyWith(
+                          color: Colors.white.withOpacity(0.9),
+                        ), // Make text visible on dark background
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        // HP Bar and Text side-by-side
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.favorite,
+                            color: Colors.redAccent,
+                            size: 20,
+                          ), // Heart icon
+                          const SizedBox(width: 8),
+                          Expanded(
+                            // Let progress bar take available space
+                            child: ClipRRect(
+                              // Apply rounded corners
+                              borderRadius: BorderRadius.circular(10),
+                              child: LinearProgressIndicator(
+                                value: monsterHealth,
+                                minHeight: 18, // Increased height
+                                backgroundColor:
+                                    Colors.grey.shade800, // Darker background
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.redAccent.shade400,
+                                ), // Brighter red
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            // HP Percentage Text
+                            '${(monsterHealth * 100).toStringAsFixed(0)}%',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.9),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ),
-              ],
+
+                  // --- Middle Section: Monster Image ---
+                  // *** MODIFIED: Use Flexible and adjust height to prevent overflow ***
+                  Flexible(
+                    // <--- Added Flexible widget
+                    child: Padding(
+                      // Keep the increased top padding to move image down
+                      padding: const EdgeInsets.only(
+                        top: 40.0,
+                        bottom: 10.0,
+                      ), // More space above
+                      child: Image.asset(
+                        currentMonster.imagePath,
+                        // *** MODIFIED: Reduced height (e.g., 480 or adjust as needed) ***
+                        height:
+                            480, // Adjusted monster size (was 640, original was 320)
+                        fit: BoxFit.contain,
+                        // TODO: Add monster idle/hit/death animations here (e.g., using AnimatedSwitcher or Rive)
+                        errorBuilder: (context, error, stackTrace) {
+                          print(
+                            'Error loading monster image: ${currentMonster.imagePath} - $error',
+                          );
+                          return const Icon(
+                            Icons.error_outline,
+                            size: 100,
+                            color: Colors.red,
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+
+                  // --- Bottom Section: Interaction Area ---
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Sentence Display
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(
+                          bottom: 15,
+                        ), // Space below sentence
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 16.0,
+                          horizontal: 12.0,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(
+                            0.5,
+                          ), // Slightly darker semi-transparent bg
+                          borderRadius: BorderRadius.circular(12.0),
+                          border: Border.all(
+                            color: Colors.blueGrey.shade700,
+                            width: 1.5,
+                          ), // Subtle border
+                        ),
+                        child: Text(
+                          currentSentence,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.headlineSmall?.copyWith(
+                            fontSize: 24,
+                            color: Colors.lightBlue.shade100,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+
+                      // Score Display Area (Shows after speaking)
+                      AnimatedOpacity(
+                        opacity: score > 0 ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 400),
+                        child: Visibility(
+                          // Use Visibility to remove space when hidden
+                          visible: score > 0,
+                          maintainAnimation: true, // Keep animations smooth
+                          maintainState: true,
+                          child: Container(
+                            margin: const EdgeInsets.only(
+                              bottom: 20,
+                            ), // Space below scores
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 8,
+                              horizontal: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              // Display detailed scores
+                              "Pronunciation: $pronunciationScore / Fluency: $fluencyScore / Accuracy: $accuracyScore",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.amberAccent.shade100,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // Speaking Button
+                      GestureDetector(
+                        // Use GestureDetector for tap/press states
+                        onTapDown: (_) {
+                          if (!isRecording) _startRecording();
+                        }, // Tap to start
+                        // onTapUp: (_) { _stopRecordingAndEvaluate(); }, // Optional: Tap again to stop early
+                        // onLongPressStart: (_) { if (!isRecording) _startRecording(); }, // Optional: Long press to start
+                        // onLongPressEnd: (_) { _stopRecordingAndEvaluate(); }, // Optional: Release long press to stop
+                        child: Container(
+                          padding: const EdgeInsets.all(
+                            18,
+                          ), // Larger padding makes the circle bigger
+                          decoration: BoxDecoration(
+                            color:
+                                isRecording
+                                    ? Colors.redAccent.shade700
+                                    : Theme.of(context)
+                                            .elevatedButtonTheme
+                                            .style
+                                            ?.backgroundColor
+                                            ?.resolve(
+                                              {
+                                                MaterialState.pressed,
+                                                MaterialState.focused,
+                                                MaterialState.hovered,
+                                              },
+                                            ) ?? // More robust color resolution
+                                        Theme.of(context)
+                                            .colorScheme
+                                            .primary, // Use theme primary color
+                            shape: BoxShape.circle, // Make it circular
+                            boxShadow: [
+                              // Add a subtle glow/shadow
+                              BoxShadow(
+                                color: (isRecording
+                                        ? Colors.redAccent.shade700
+                                        : Theme.of(context)
+                                                .elevatedButtonTheme
+                                                .style
+                                                ?.backgroundColor
+                                                ?.resolve(
+                                                  {
+                                                    MaterialState.pressed,
+                                                    MaterialState.focused,
+                                                    MaterialState.hovered,
+                                                  },
+                                                ) // More robust color resolution
+                                                ??
+                                            Theme.of(context)
+                                                .colorScheme
+                                                .primary) // Use theme primary color
+                                    .withOpacity(0.5),
+                                blurRadius: 10,
+                                spreadRadius: 2,
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            // Mic icon inside the circle
+                            isRecording
+                                ? Icons.mic_off_rounded
+                                : Icons.mic_rounded,
+                            color:
+                                isRecording
+                                    ? Colors.white
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .onPrimary, // Use theme color for contrast
+                            size: 35, // Icon size
+                          ),
+                          // TODO: Add voice wave animation around/inside the button when recording
+                        ),
+                      ),
+                      const SizedBox(height: 10), // Space below button
+                      // --- Placeholder for Timer/Animations ---
+                      // Example: A simple countdown bar placeholder
+                      // Container(height: 10, width: 150, color: Colors.grey.withOpacity(0.5), margin: const EdgeInsets.only(top: 15)),
+                      // Text("Timer placeholder", style: TextStyle(color: Colors.grey)),
+                      // TODO: Implement countdown timer bar or attack animation display area here
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+
+          // --- Layer 3 (Optional): Attack Animations / Damage Numbers ---
+          // TODO: Use Positioned or Align widgets here to overlay animations
+          // Example: Positioned(top: 150, left: 100, child: DamageNumberWidget(damage: 123))
+        ],
       ),
     );
   }
@@ -340,56 +760,52 @@ class _GameplayScreenState extends State<GameplayScreen> {
 // --- 5. 結算 (Results Screen) ---
 class ResultsScreen extends StatelessWidget {
   const ResultsScreen({super.key});
-  // // 如果需要接收參數：
-  // final int finalScore;
-  // const ResultsScreen({super.key, required this.finalScore});
-
   @override
   Widget build(BuildContext context) {
-    // // 如果需要從路由接收參數：
-    // final finalScore = ModalRoute.of(context)!.settings.arguments as int?;
-
+    // TODO: Receive and display actual results data
     return Scaffold(
       appBar: AppBar(
-        title: const Text('戰鬥結算'),
-        automaticallyImplyLeading: false, // 不顯示返回按鈕
+        title: const Text('挑戰完成'),
+        automaticallyImplyLeading: false,
       ),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
+            const Icon(Icons.emoji_events, size: 100, color: Colors.amber),
+            const SizedBox(height: 20),
             Text(
-              '恭喜！戰鬥勝利！', // 或 "挑戰結束"
+              '恭喜！擊敗了怪物！',
               style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 30),
-            // TODO: 顯示更詳細的結算資訊，例如總分、平均發音分、獲得的星星等
-            const Icon(Icons.star, size: 80, color: Colors.amber), // 範例：顯示星星
-            Text(
-              '總分: ${950}', // 範例分數
-              // '總分: ${finalScore ?? 'N/A'}', // 使用傳入的分數
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            // 可以顯示錯誤回饋
-            // Text('發音建議: 注意 "th" 的發音'),
-            const SizedBox(height: 50),
-            ElevatedButton(
-              onPressed: () {
-                // 返回主題選擇頁面，重新開始一輪
-                Navigator.of(context).pushReplacementNamed('/topic_selection');
-              },
-              child: const Text('再玩一次'),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
-            OutlinedButton(
+            Text(
+              '總分: ${950 + Random().nextInt(151)}',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: Colors.lightGreenAccent,
+              ),
+            ),
+            // TODO: Display more detailed results (average scores, stars etc.)
+            const SizedBox(height: 60),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.replay_rounded),
+              label: const Text('再挑戰一次'),
               onPressed: () {
-                // 返回主頁，使用 pushNamedAndRemoveUntil 清除中間的頁面堆疊
+                Navigator.of(context).pushReplacementNamed('/topic_selection');
+              },
+            ),
+            const SizedBox(height: 20),
+            TextButton.icon(
+              icon: const Icon(Icons.home_rounded, size: 20),
+              label: const Text('返回主頁'),
+              onPressed: () {
                 Navigator.of(context).pushNamedAndRemoveUntil(
                   '/home',
                   (Route<dynamic> route) => false,
                 );
               },
-              child: const Text('返回主頁'),
+              style: TextButton.styleFrom(foregroundColor: Colors.white70),
             ),
           ],
         ),
