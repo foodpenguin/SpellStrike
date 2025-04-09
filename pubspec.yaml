@@ -39,6 +39,10 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  flutter_tts: ^3.6.3         # 語音播放
+  audioplayers: ^5.2.0        # 音效播放
+  http: ^1.1.0                # 發送 HTTP 請求（串 API）
+  provider: ^6.1.1            # 狀態管理
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
