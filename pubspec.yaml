@@ -45,6 +45,9 @@ dev_dependencies:
   audioplayers: ^5.2.0        # 音效播放
   http: ^1.1.0                # 發送 HTTP 請求（串 API）
   provider: ^6.1.1            # 狀態管理
+  flutter_sound: ^9.2.13      # 錄音
+  permission_handler: ^11.0.1 # 向用戶請求權限
+  path_provider: ^2.1.2       # 路徑獲取
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
