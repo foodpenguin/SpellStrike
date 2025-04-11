@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async'; // 用於 Splash Screen 的計時器
 import 'dart:math'; // 用於隨機選擇怪物
+import 'services/recording.dart';  // 引用錄音功能
 
 void main() {
   runApp(const SpellStrikeApp());
@@ -14,6 +15,9 @@ class MonsterInfo {
 
   MonsterInfo({required this.name, required this.imagePath, this.level = 1});
 }
+
+AudioRecorder _audioRecorder = AudioRecorder(); //創建錄音器物件
+
 
 // 定義怪物資料
 final Map<String, MonsterInfo> monsters = {
@@ -148,6 +152,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    _audioRecorder.initRecorder();  // 初始化錄音器
     Timer(const Duration(seconds: 3), () {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/home');
@@ -388,11 +393,14 @@ class _GameplayScreenState extends State<GameplayScreen> {
     });
     print("開始錄音...");
     // TODO: Start actual voice recording & processing
+    _audioRecorder.startRecording();
     // Placeholder delay
     Future.delayed(const Duration(seconds: 4), _stopRecordingAndEvaluate);
   }
 
   void _stopRecordingAndEvaluate() {
+    _audioRecorder.stopRecording();
+
     if (!mounted) return;
 
     // --- TODO: Replace with actual API call results ---
