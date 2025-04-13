@@ -3,9 +3,13 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class WhisperService {
-  final String apiKey = 'hf_xxxxxxxxxxxxxxxxxxxxxxxx'; // 換成你自己的 Token
-  final String modelUrl = 'https://api-inference.huggingface.co/models/openai/whisper-large-v3';
+  final String apiKey = dotenv.env['API_KEY'] ?? '';
+  final String modelUrl =
+      'https://api-inference.huggingface.co/models/openai/whisper-large-v3';
+
 
   // 傳送錄音檔並將回傳的文字寫入 txt 檔
   Future<File?> transcribeAudioAndSave(File audioFile) async {
@@ -23,6 +27,10 @@ class WhisperService {
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
         final transcript = decoded['text'];
+
+
+        /// 📝 插入 Log：顯示 Whisper API 的文字轉錄內容
+        print('📝 Whisper 轉錄內容：$transcript');
 
         // 儲存為 .txt 檔案
         final dir = await getApplicationDocumentsDirectory();
@@ -47,4 +55,6 @@ class WhisperService {
     final dir = await getApplicationDocumentsDirectory();
     return '${dir.path}/transcription.txt';
   }
+
 }
+
