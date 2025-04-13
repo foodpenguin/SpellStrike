@@ -1,33 +1,306 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:convert'; // Keep utf8 for GPT response decoding
+import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'dart:async'; // 用於 Splash Screen 的計時器
-import 'dart:math'; // 用於隨機選擇怪物
-import 'services/recording.dart'; // 引用錄音功能
-import 'services/whisper.dart'; // 語音轉文字
-import 'services/soundplayer.dart'; // 播放音檔
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:csv/csv.dart'; // <--- Import the CSV package
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load();
-  runApp(const SpellStrikeApp());
+/// 評分結果物件，包含評分（滿分10）與回饋內容
+class EvaluationResult {
+  final int score; // 評分（0~10）
+  final String feedback;
+  EvaluationResult({required this.score, required this.feedback});
+
+  @override
+  String toString() {
+    return 'Score: $score, Feedback: $feedback';
+  }
 }
 
-// --- 資料模型 ---
+/// 錄音器整合，包含錄音、語音轉文字與 GPT 評分
+class AudioRecorder {
+  FlutterSoundRecorder? _recorder;
+  bool _isRecording = false;
+  String? _recordedFilePath;
+
+  /// 初始化錄音器並請求麥克風權限
+  Future<void> initRecorder() async {
+    _recorder = FlutterSoundRecorder();
+    await _recorder!.openRecorder();
+    await Permission.microphone.request();
+  }
+
+  /// 開始錄音，錄音檔暫存至臨時資料夾
+  Future<void> startRecording() async {
+    if (_isRecording) return;
+    final dir = await getTemporaryDirectory();
+    // --- 修改檔案名稱和編碼 ---
+    String path = '${dir.path}/voice_record.m4a'; // <--- 改為 .m4a
+    await _recorder!.startRecorder(
+      toFile: path,
+      codec: Codec.aacMP4, // <--- 改用 aacMP4 (產生 .m4a)
+    );
+    // --- 修改結束 ---
+    _isRecording = true;
+    _recordedFilePath = path;
+    print("🎤 錄音開始... 儲存到: $path");
+  }
+
+  /// 停止錄音，並進行語音轉文字及 GPT 評分，回傳 [EvaluationResult]
+  Future<EvaluationResult?> stopRecordingAndEvaluate() async {
+    if (!_isRecording) return null;
+    try {
+      await _recorder!.stopRecorder();
+    } catch (e) {
+      print("❌ stopRecorder 發生錯誤: $e");
+      _isRecording = false;
+      return null;
+    }
+    _isRecording = false;
+    print("✅ 錄音完成，檔案儲存路徑: $_recordedFilePath");
+
+    if (_recordedFilePath != null && File(_recordedFilePath!).existsSync()) {
+      final transcription = await _transcribeAudioToText(_recordedFilePath!);
+      if (transcription != null) {
+        print("📝 Whisper 譯文: $transcription");
+        final evaluation = await _evaluateEnglish(transcription);
+        print("📊 GPT 評分結果: $evaluation");
+        return evaluation;
+      } else {
+        print("❌ Whisper 轉譯結果為空或轉譯失敗");
+      }
+    } else {
+      print("❌ 錄音檔案不存在或路徑為空: $_recordedFilePath");
+    }
+    return null;
+  }
+
+  /// 呼叫 OpenAI Whisper API 將音檔轉換為文字 (加入重試機制)
+  Future<String?> _transcribeAudioToText(String filePath) async {
+    final apiKey = dotenv.env['GPT_KEY'];
+    if (apiKey == null) {
+      print("❌ API 金鑰不存在，請確認 .env 中有 GPT_KEY");
+      return null;
+    }
+
+    int retries = 0;
+    const maxRetries = 3;
+    const initialDelay = Duration(seconds: 1);
+
+    while (retries < maxRetries) {
+      try {
+        var request = http.MultipartRequest(
+          'POST',
+          Uri.parse('https://api.openai.com/v1/audio/transcriptions'),
+        );
+        request.headers['Authorization'] = 'Bearer $apiKey';
+        request.files.add(
+          await http.MultipartFile.fromPath(
+            'file',
+            filePath,
+            // --- 修改 ContentType ---
+            contentType: MediaType('audio', 'm4a'), // <--- 改為 m4a
+            // --- 修改結束 ---
+          ),
+        );
+        request.fields['model'] = 'whisper-1';
+
+        print("🚀 [Whisper] 正在嘗試轉譯音檔 (第 ${retries + 1} 次)...");
+        var response = await request.send();
+
+        if (response.statusCode == 200) {
+          final resBody = await response.stream.bytesToString();
+          print("✅ [Whisper] 轉譯成功");
+          return jsonDecode(resBody)['text'];
+        } else if (response.statusCode == 429) {
+          retries++;
+          if (retries >= maxRetries) {
+            print("❌ [Whisper] 轉譯失敗: ${response.statusCode} (已達最大重試次數)");
+            final errorBody = await response.stream.bytesToString();
+            print("錯誤內容: $errorBody");
+            return null;
+          }
+          final delay =
+              initialDelay * (1 << (retries - 1)); // Exponential backoff
+          print(
+            "⏳ [Whisper] API 速率限制 (429)，將在 ${delay.inSeconds} 秒後重試 ($retries/$maxRetries)...",
+          );
+          await Future.delayed(delay);
+        } else {
+          // --- 修改：在其他錯誤時也印出錯誤內容 ---
+          final errorBody = await response.stream.bytesToString();
+          print("❌ [Whisper] 轉譯失敗: ${response.statusCode}, 錯誤內容: $errorBody");
+          return null; // 其他錯誤直接返回
+          // --- 修改結束 ---
+        }
+      } catch (e) {
+        print("❌ [Whisper] _transcribeAudioToText 發生例外錯誤: $e");
+        // 考慮是否在特定網路錯誤下重試
+        retries++; // 發生例外也計入重試，避免無限迴圈
+        if (retries >= maxRetries) {
+          print("❌ [Whisper] 例外錯誤達到最大重試次數");
+          return null;
+        }
+        final delay = initialDelay * (1 << (retries - 1));
+        print(
+          "⏳ [Whisper] 發生例外，將在 ${delay.inSeconds} 秒後重試 ($retries/$maxRetries)...",
+        );
+        await Future.delayed(delay);
+        // return null; // 如果不想在例外時重試，則取消註解此行並移除上面的重試邏輯
+      }
+    }
+    print("❌ [Whisper] 轉譯在重試後仍然失敗");
+    return null;
+  }
+
+  /// 呼叫 OpenAI GPT API，要求以 JSON 格式回傳評分結果（score 與 feedback）(加入重試機制)
+  Future<EvaluationResult?> _evaluateEnglish(String text) async {
+    final apiKey = dotenv.env['GPT_KEY'];
+    if (apiKey == null) {
+      print("❌ API 金鑰不存在");
+      return null;
+    }
+
+    int retries = 0;
+    const maxRetries = 3;
+    const initialDelay = Duration(seconds: 1);
+
+    while (retries < maxRetries) {
+      try {
+        print("🚀 [GPT] 正在嘗試評分 (第 ${retries + 1} 次)...");
+        final response = await http
+            .post(
+              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              headers: {
+                'Authorization': 'Bearer $apiKey',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                "model": "gpt-3.5-turbo",
+                "messages": [
+                  {
+                    "role": "system",
+                    "content":
+                        "你是一位專業英文口說教師，請根據學生的英文發音與語法表現評分（滿分10分）。請回傳有效的 JSON 格式，只包含兩個欄位：score（數字）與 feedback（文字），例如：{\"score\": 8, \"feedback\": \"發音不錯，但語法有待改善。\"}。請勿包含多餘文字。",
+                  },
+                  {"role": "user", "content": text},
+                ],
+              }),
+            )
+            .timeout(const Duration(seconds: 30)); // 設定超時
+
+        if (response.statusCode == 200) {
+          try {
+            final result = jsonDecode(
+              utf8.decode(response.bodyBytes),
+            ); // 使用 utf8 解碼確保中文正常
+            final content = result['choices'][0]['message']['content'];
+            final parsed = jsonDecode(content); // 解析 GPT 回傳內容中的 JSON 字串
+            final int score =
+                parsed['score'] is int
+                    ? parsed['score']
+                    : int.tryParse(parsed['score'].toString()) ?? 0; // 更安全的型別轉換
+            final String feedback =
+                parsed['feedback'] ?? "No feedback provided.";
+            print("✅ [GPT] 評分成功");
+            return EvaluationResult(score: score, feedback: feedback);
+          } catch (e) {
+            print("❌ [GPT] 解析結果失敗: $e");
+            print("原始回應內容: ${response.body}"); // 印出原始回應方便除錯
+            // 解析失敗也視為一種錯誤，進行重試
+            retries++;
+            if (retries >= maxRetries) {
+              print("❌ [GPT] 解析失敗達到最大重試次數");
+              return null;
+            }
+            final delay = initialDelay * (1 << (retries - 1));
+            print(
+              "⏳ [GPT] 解析失敗，將在 ${delay.inSeconds} 秒後重試 ($retries/$maxRetries)...",
+            );
+            await Future.delayed(delay);
+            // return null; // 如果不想重試解析錯誤，則取消註解此行
+          }
+        } else if (response.statusCode == 429) {
+          retries++;
+          if (retries >= maxRetries) {
+            print("❌ [GPT] 評分失敗: ${response.statusCode} (已達最大重試次數)");
+            print("錯誤內容: ${response.body}");
+            return null;
+          }
+          final delay = initialDelay * (1 << (retries - 1));
+          print(
+            "⏳ [GPT] API 速率限制 (429)，將在 ${delay.inSeconds} 秒後重試 ($retries/$maxRetries)...",
+          );
+          await Future.delayed(delay);
+        } else {
+          print("❌ [GPT] 評分失敗: ${response.statusCode}");
+          print("錯誤內容: ${response.body}");
+          return null; // 其他錯誤直接返回
+        }
+      } on TimeoutException catch (e) {
+        print("❌ [GPT] 請求超時: $e");
+        retries++;
+        if (retries >= maxRetries) {
+          print("❌ [GPT] 請求超時達到最大重試次數");
+          return null;
+        }
+        final delay = initialDelay * (1 << (retries - 1));
+        print(
+          "⏳ [GPT] 請求超時，將在 ${delay.inSeconds} 秒後重試 ($retries/$maxRetries)...",
+        );
+        await Future.delayed(delay);
+      } catch (e) {
+        print("❌ [GPT] _evaluateEnglish 發生例外錯誤: $e");
+        retries++; // 發生例外也計入重試
+        if (retries >= maxRetries) {
+          print("❌ [GPT] 例外錯誤達到最大重試次數");
+          return null;
+        }
+        final delay = initialDelay * (1 << (retries - 1));
+        print(
+          "⏳ [GPT] 發生例外，將在 ${delay.inSeconds} 秒後重試 ($retries/$maxRetries)...",
+        );
+        await Future.delayed(delay);
+        // return null; // 如果不想在例外時重試
+      }
+    }
+    print("❌ [GPT] 評分在重試後仍然失敗");
+    return null;
+  }
+
+  // 取得錄音檔案路徑（若需要）
+  String? getRecordedFilePath() {
+    return _recordedFilePath;
+  }
+
+  // 判斷是否正在錄音
+  bool get isRecording => _isRecording;
+
+  // 釋放錄音器資源
+  void dispose() {
+    _recorder?.closeRecorder();
+  }
+}
+
+/// 以下為遊戲相關的 UI 與邏輯
+
+// 資料模型：怪物資訊
 class MonsterInfo {
   final String name;
   final String imagePath;
   final int level;
-
   MonsterInfo({required this.name, required this.imagePath, this.level = 1});
 }
 
-AudioRecorder _audioRecorder = AudioRecorder(); //創建錄音器物件
-late WhisperService _whisperService; // 創建錄音轉文字物件
-AudioPlayerService _audioPlayer = AudioPlayerService(); // 創建音檔播放器物件
-
-// 定義怪物資料
+// 建立全域怪物資料
 final Map<String, MonsterInfo> monsters = {
   'Glumburn': MonsterInfo(
     name: 'Glumburn (哀焰獸)',
@@ -51,10 +324,17 @@ final Map<String, MonsterInfo> monsters = {
   ),
 };
 
-// --- App 主體 ---
+// 建立單一錄音器物件（整合錄音、轉文字與評分）
+AudioRecorder _audioRecorder = AudioRecorder();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load();
+  runApp(const SpellStrikeApp());
+}
+
 class SpellStrikeApp extends StatelessWidget {
   const SpellStrikeApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -65,7 +345,6 @@ class SpellStrikeApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
-        // fontFamily: 'YourMagicFont', // 如果你有添加特殊字體
         textTheme: const TextTheme(
           bodyMedium: TextStyle(fontSize: 18.0, color: Colors.white),
           headlineLarge: TextStyle(
@@ -88,13 +367,12 @@ class SpellStrikeApp extends StatelessWidget {
             fontWeight: FontWeight.bold,
             color: Colors.white,
           ),
-          // 可以為怪物名稱定義特殊字體樣式
           titleMedium: TextStyle(
             fontSize: 18.0,
             fontWeight: FontWeight.bold,
             color: Color(0xFF90CAF9),
             letterSpacing: 1.2,
-          ), // 範例：藍色、稍大字間距
+          ),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.transparent,
@@ -108,7 +386,7 @@ class SpellStrikeApp extends StatelessWidget {
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00D2FF), // 亮藍色按鈕
+            backgroundColor: const Color(0xFF00D2FF),
             foregroundColor: Colors.black,
             padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 18),
             textStyle: const TextStyle(
@@ -122,10 +400,9 @@ class SpellStrikeApp extends StatelessWidget {
           ),
         ),
         progressIndicatorTheme: ProgressIndicatorThemeData(
-          // 進度條 (血條) 樣式
-          color: Colors.redAccent.shade400, // 血條主要顏色
-          linearTrackColor: Colors.grey.shade800, // 血條背景色
-          linearMinHeight: 18, // 血條高度
+          color: Colors.redAccent.shade400,
+          linearTrackColor: Colors.grey.shade800,
+          linearMinHeight: 18,
         ),
         splashColor: const Color(0xFF4A00E0).withOpacity(0.3),
         scaffoldBackgroundColor: const Color(0xFF1A1A2E),
@@ -137,19 +414,22 @@ class SpellStrikeApp extends StatelessWidget {
         '/home': (context) => const HomeScreen(),
         '/topic_selection': (context) => const TopicSelectionScreen(),
         '/gameplay': (context) {
-          final monsterInfo =
-              ModalRoute.of(context)?.settings.arguments as MonsterInfo?;
+          final args = ModalRoute.of(context)?.settings.arguments as Map?;
+          final monsterInfo = args?['monsterInfo'] as MonsterInfo?;
+          final topic = args?['topic'] as String?;
           final defaultMonster = monsters.values.first;
-          return GameplayScreen(monsterInfo: monsterInfo ?? defaultMonster);
+          return GameplayScreen(
+            monsterInfo: monsterInfo ?? defaultMonster,
+            topic: topic ?? '隨機挑戰',
+          );
         },
         '/results': (context) => const ResultsScreen(),
-        // '/settings': (context) => const SettingsScreen(),
       },
     );
   }
 }
 
-// --- 1. 起始畫面 (Splash Screen) ---
+// 1. 起始畫面 (Splash Screen)
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override
@@ -161,8 +441,6 @@ class _SplashScreenState extends State<SplashScreen> {
   void initState() {
     super.initState();
     _audioRecorder.initRecorder(); // 初始化錄音器
-    _whisperService = WhisperService(); // 初始化語音轉文字功能
-    _audioPlayer.initPlayer(); // 初始化音檔播放器
     Timer(const Duration(seconds: 3), () {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/home');
@@ -181,7 +459,7 @@ class _SplashScreenState extends State<SplashScreen> {
               'assets/images/logo.png',
               height: 250,
               errorBuilder: (context, error, stackTrace) {
-                print('Error loading logo on splash: $error');
+                print('Error loading logo: $error');
                 return Text(
                   'SpellStrike',
                   style: Theme.of(context).textTheme.headlineLarge,
@@ -199,40 +477,22 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-// --- 2. 主頁 (Home Screen) ---
+// 2. 主頁 (Home Screen)
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
-  void _showCharacterInteraction(BuildContext context) {
-    /* ... */
-  }
-  void _openSettings(BuildContext context) {
-    /* ... */
-  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Image.asset(
-            'assets/images/home_background.png',
-            fit: BoxFit.cover /* errorBuilder */,
-          ),
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: () => _showCharacterInteraction(context),
-              child: Container(color: Colors.transparent),
-            ),
-          ),
+          Image.asset('assets/images/home_background.png', fit: BoxFit.cover),
           SafeArea(
             child: Align(
               alignment: Alignment.topCenter,
               child: Padding(
                 padding: const EdgeInsets.only(top: 20.0),
-                child: Image.asset(
-                  'assets/images/logo.png',
-                  height: 240 /* errorBuilder */,
-                ),
+                child: Image.asset('assets/images/logo.png', height: 240),
               ),
             ),
           ),
@@ -245,8 +505,6 @@ class HomeScreen extends StatelessWidget {
                 children: [
                   ElevatedButton.icon(
                     onPressed: () {
-                      // TODO: 添加按鈕的功能
-                      print('開始遊戲按鈕被點擊');
                       Navigator.of(context).pushNamed('/topic_selection');
                     },
                     icon: const Icon(Icons.play_arrow),
@@ -260,9 +518,8 @@ class HomeScreen extends StatelessWidget {
                     ),
                     child: IconButton(
                       onPressed: () {
-                        // TODO: 添加設定按鈕的功能
+                        // 設定頁面可依需求擴充
                         print('設定按鈕被點擊');
-                        Navigator.of(context).pushNamed('/settings');
                       },
                       icon: const Icon(Icons.settings),
                       color: Colors.white,
@@ -278,10 +535,9 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-// --- 3. 抽題目類型 (Topic Selection Screen) - *** 修正 *** ---
+// 3. 主題選擇畫面 (Topic Selection Screen)
 class TopicSelectionScreen extends StatelessWidget {
   const TopicSelectionScreen({super.key});
-
   MonsterInfo _getMonsterForTopic(String topic) {
     final monsterKeys = monsters.keys.toList();
     final random = Random();
@@ -303,276 +559,284 @@ class TopicSelectionScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<String> topics = ['日常生活', '旅遊英語', '商務會話', '奇幻冒險', '隨機挑戰'];
-
     return Scaffold(
       appBar: AppBar(title: const Text('選擇挑戰主題')),
-      // *** 恢復 Center 的 child 內容 ***
       body: Center(
-        // 讓內容在螢幕中央
         child: Column(
-          // 垂直佈局
-          mainAxisAlignment: MainAxisAlignment.center, // 主軸居中 (雖然 Expanded 會填滿)
+          mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            Padding(
-              // 頂部文字標題
-              padding: const EdgeInsets.symmetric(vertical: 30.0), // 上下間距
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 30.0),
               child: Text(
                 '選擇你想練習的主題',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Colors.lightBlue[100],
-                ), // 使用主題樣式並微調顏色
+                style: TextStyle(fontSize: 24, color: Colors.white70),
               ),
             ),
             Expanded(
-              // 讓 ListView 填滿剩餘的垂直空間
               child: ListView.builder(
-                // 建立按鈕列表
-                itemCount: topics.length, // 列表項數量 = 主題數量
+                itemCount: topics.length,
                 itemBuilder: (context, index) {
-                  // 如何建立每個列表項
-                  final topic = topics[index]; // 獲取當前主題文字
+                  final topic = topics[index];
                   return Padding(
-                    // 為每個按鈕添加垂直和水平邊距
                     padding: const EdgeInsets.symmetric(
                       vertical: 10.0,
                       horizontal: 50.0,
                     ),
                     child: ElevatedButton(
-                      // 每個主題是一個按鈕
                       onPressed: () {
-                        // 按下按鈕時的動作
-                        // 根據選中的主題獲取怪物資訊
                         final selectedMonster = _getMonsterForTopic(topic);
-                        // 導航到遊戲畫面，並將怪物資訊作為參數傳遞
-                        Navigator.of(
-                          context,
-                        ).pushNamed('/gameplay', arguments: selectedMonster);
+                        Navigator.of(context).pushNamed(
+                          '/gameplay',
+                          arguments: {
+                            'monsterInfo': selectedMonster,
+                            'topic': topic,
+                          },
+                        );
                       },
-                      child: Text(topic), // 按鈕顯示的文字
+                      child: Text(topic),
                     ),
                   );
                 },
               ),
             ),
-            const SizedBox(height: 20), // 在列表底部增加一些額外空間
+            const SizedBox(height: 20),
           ],
         ),
-      ), // *** Center 的 child 結束 ***
+      ),
     );
   }
 }
 
-// --- Placeholder for MonsterInfo ---
-// You should have your actual MonsterInfo class defined elsewhere
-// --- End of Placeholder ---
-// --- 4. 打怪 (Gameplay Screen) - *** 全面修改 *** ---
+// 4. 打怪畫面 (Gameplay Screen)
 class GameplayScreen extends StatefulWidget {
   final MonsterInfo monsterInfo;
-  const GameplayScreen({super.key, required this.monsterInfo});
-
+  final String topic;
+  const GameplayScreen({
+    super.key,
+    required this.monsterInfo,
+    required this.topic,
+  });
   @override
   State<GameplayScreen> createState() => _GameplayScreenState();
 }
 
 class _GameplayScreenState extends State<GameplayScreen> {
   late MonsterInfo currentMonster;
+  late String currentTopic;
   String currentSentence = "Loading sentence...";
   double monsterHealth = 1.0;
   bool isRecording = false;
   int score = 0;
-  // Placeholder for detailed scores
-  int pronunciationScore = 0;
-  int fluencyScore = 0;
-  int accuracyScore = 0; // 可以加一個準確度分數
+  int evaluationScore = 0;
+  String evaluationFeedback = "";
+  List<String> _topicSentences = [];
+  bool _isLoadingSentences = true;
 
   @override
   void initState() {
     super.initState();
     currentMonster = widget.monsterInfo;
-    _loadNextSentence();
+    currentTopic = widget.topic;
+    _loadSentencesForTopic();
+  }
+
+  // 載入指定主題的所有句子 (修改為讀取單一 CSV 並按欄位選取)
+  Future<void> _loadSentencesForTopic() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingSentences = true;
+      currentSentence = "Loading sentences...";
+    });
+    try {
+      // Load the single CSV file
+      final String filePath =
+          'assets/topic/topic.csv'; // <--- Load the main CSV
+      final String csvData = await rootBundle.loadString(filePath);
+
+      // Use the CSV package to parse the data
+      // Use CsvToListConverter with eol: '\n' if lines might end differently
+      final List<List<dynamic>> csvTable = const CsvToListConverter().convert(
+        csvData,
+      );
+
+      if (csvTable.isEmpty) {
+        throw Exception("CSV file is empty.");
+      }
+
+      // Find the header row (first row) - convert to String for comparison
+      final List<String> headers =
+          csvTable[0].map((h) => h.toString().trim()).toList();
+      // Find the column index for the current topic
+      final int topicColumnIndex = headers.indexOf(currentTopic);
+
+      if (topicColumnIndex == -1) {
+        // Topic not found in CSV header
+        print("⚠️ 主題 '$currentTopic' 在 topic.csv 的標頭中找不到。");
+        _topicSentences = ["Error: Topic '$currentTopic' not found in CSV."];
+      } else {
+        // Extract sentences from the correct column, skipping the header row
+        _topicSentences =
+            csvTable
+                .skip(1) // Skip header row
+                .map((row) {
+                  // Check if the row has enough columns
+                  if (row.length > topicColumnIndex) {
+                    // Get data from the specific column index and convert to String
+                    return row[topicColumnIndex]?.toString().trim() ?? '';
+                  }
+                  return ''; // Return empty if row is too short
+                })
+                .where((s) => s.isNotEmpty) // Filter out empty strings
+                .toList();
+      }
+
+      if (_topicSentences.isEmpty) {
+        print("⚠️ 主題 '$currentTopic' 在 topic.csv 中沒有找到對應的題目。");
+        _topicSentences = ["Error: No sentences found for '$currentTopic'."];
+      }
+      _loadNextSentence();
+    } catch (e) {
+      print("❌ 讀取或解析 topic.csv 失敗: $e");
+      // Check specifically for FormatException which might indicate encoding issues
+      if (e is FormatException) {
+        print("   可能原因：topic.csv 檔案未儲存為 UTF-8 編碼。");
+      }
+      _topicSentences = ["Error loading sentences."];
+      _loadNextSentence();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingSentences = false;
+        });
+      }
+    }
+  }
+
+  // 從已載入的句子列表中隨機選取一個
+  void _loadNextSentence() {
+    if (_topicSentences.isEmpty || !mounted) return;
+    setState(() {
+      currentSentence =
+          _topicSentences[Random().nextInt(_topicSentences.length)];
+    });
   }
 
   void _startRecording() {
     if (!mounted) return;
     setState(() {
       isRecording = true;
-      score = 0; // Reset scores for new attempt
-      pronunciationScore = 0;
-      fluencyScore = 0;
-      accuracyScore = 0;
+      // 清空上一次的分數與回饋
+      score = 0;
+      evaluationScore = 0;
+      evaluationFeedback = "";
     });
     print("開始錄音...");
-    // TODO: Start actual voice recording & processing
     _audioRecorder.startRecording();
-    // Placeholder delay
+    // 模擬 4 秒錄音時間，錄音結束後進行評分
     Future.delayed(const Duration(seconds: 4), _stopRecordingAndEvaluate);
   }
 
-  void _stopRecordingAndEvaluate() {
-    _audioRecorder.stopRecording();
-    final path = _audioRecorder.getRecordedFilePath();
-    if (path != null) {
-      _whisperService.transcribeAudioAndSave(File(path));
-      print("音源已轉成文字檔");
-      _audioPlayer.play(path);
-    } else {
-      print("沒有音檔");
-    }
-
-    if (!mounted) return;
-
-    // --- TODO: Replace with actual API call results ---
-    final random = Random();
-    final calculatedPronunciationScore =
-        60 + random.nextInt(41); // Simulate 60-100
-    final calculatedFluencyScore = 70 + random.nextInt(31); // Simulate 70-100
-    final calculatedAccuracyScore = 80 + random.nextInt(21); // Simulate 80-100
-    // Calculate overall score (example: weighted average)
-    final overallScore =
-        ((calculatedPronunciationScore * 0.4) +
-                (calculatedFluencyScore * 0.3) +
-                (calculatedAccuracyScore * 0.3))
-            .round();
-    // --- End of simulation ---
-
-    final damageFactor = 500.0 + (currentMonster.level * 50);
-    final damageDealt = overallScore / damageFactor;
-
-    setState(() {
-      isRecording = false;
-      score = overallScore; // Update overall score display
-      pronunciationScore = calculatedPronunciationScore;
-      fluencyScore = calculatedFluencyScore;
-      accuracyScore = calculatedAccuracyScore; // Store detailed scores
-
-      monsterHealth -= damageDealt;
-      if (monsterHealth < 0) monsterHealth = 0;
-
+  void _stopRecordingAndEvaluate() async {
+    final evaluation = await _audioRecorder.stopRecordingAndEvaluate();
+    if (evaluation != null) {
+      // 假設 GPT 回傳的 score 為 0~10，我們乘以10變成 0~100 的分數
+      int evalScore = evaluation.score;
+      int overallScore = evalScore * 10;
+      final damageFactor = 500.0 + (currentMonster.level * 50);
+      final damageDealt = overallScore / damageFactor;
+      setState(() {
+        isRecording = false;
+        evaluationScore = evalScore;
+        evaluationFeedback = evaluation.feedback;
+        score = overallScore;
+        monsterHealth -= damageDealt;
+        if (monsterHealth < 0) monsterHealth = 0;
+      });
       print(
-        "評分完成 - Overall: $score (P:$pronunciationScore, F:$fluencyScore, A:$accuracyScore), ${currentMonster.name} HP: ${(monsterHealth * 100).toStringAsFixed(0)}%",
+        "評分完成 - GPT Score: $evalScore (Overall: $overallScore), Damage: $damageDealt, ${currentMonster.name} HP: ${(monsterHealth * 100).toStringAsFixed(0)}%",
       );
-
-      // TODO: Trigger attack animations based on score (e.g., high score = critical hit)
-      // Example: if (overallScore > 90) { _triggerCriticalHitAnimation(); } else { _triggerNormalHitAnimation(); }
-
       if (monsterHealth <= 0) {
         print("怪物 ${currentMonster.name} 被擊敗！");
-        // TODO: Trigger monster defeat animation
         _goToResults();
       } else {
-        // TODO: Trigger monster hit animation
         _loadNextSentence();
       }
-    });
-  }
-
-  void _loadNextSentence() {
-    // TODO: Load actual sentences based on topic/difficulty
-    final sentences = [
-      "Say the word: 'magic'",
-      "Read aloud: 'Abracadabra!'",
-      "Pronounce: 'Wizardry'",
-      "Speak: 'Incantation'",
-      "Try this: 'Mystical Orb'",
-    ];
-    if (!mounted) return;
-    setState(() {
-      // Reset scores for the new sentence, except the main score display which is handled in startRecording
-      pronunciationScore = 0;
-      fluencyScore = 0;
-      accuracyScore = 0;
-      // Load new sentence
-      currentSentence = sentences[Random().nextInt(sentences.length)];
-    });
+    } else {
+      setState(() {
+        isRecording = false;
+      });
+      print("評分結果取得失敗");
+      _loadNextSentence();
+    }
   }
 
   void _goToResults() {
-    // TODO: Pass final results (total score, stats) to results screen
     if (mounted) {
-      // Example navigation, replace '/results' with your actual route name
-      // Make sure you have a route defined for '/results' in your MaterialApp
       Navigator.of(context).pushReplacementNamed('/results');
-      // If you don't have named routes setup, use:
-      // Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => ResultsScreen())); // Replace ResultsScreen with your actual results screen widget
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // AppBar is usually hidden in gameplay for immersion
+      // 隱藏 AppBar 以增進沉浸感
       body: Stack(
-        // Use Stack for layering background and UI
         fit: StackFit.expand,
         children: [
-          // --- 1. Background Image ---
+          // 背景圖片
           Image.asset(
-            'assets/images/gameplay_background.png', // New background
-            fit: BoxFit.cover, // Cover the entire screen
+            'assets/images/gameplay_background.png',
+            fit: BoxFit.cover,
             errorBuilder: (context, error, stackTrace) {
-              print('Error loading gameplay background: $error');
+              print('Error loading background: $error');
               return Container(
                 color: Theme.of(context).scaffoldBackgroundColor,
               );
             },
           ),
-
-          // --- 2. Main Gameplay UI Column ---
           SafeArea(
-            // Ensure UI elements don't overlap with system areas
             child: Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: 20.0,
                 vertical: 10.0,
               ),
               child: Column(
-                // Distribute space: Monster area, Sentence/Score area, Button area
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // --- Top Section: Monster Info ---
+                  // 上方：怪物資訊與血條
                   Column(
-                    mainAxisSize: MainAxisSize.min, // Take minimum space
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        // Monster Name & Level
                         '${currentMonster.name} (Lv.${currentMonster.level})',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.titleMedium?.copyWith(
-                          color: Colors.white.withOpacity(0.9),
-                        ), // Make text visible on dark background
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(color: Colors.white.withOpacity(0.9)),
                       ),
                       const SizedBox(height: 8),
                       Row(
-                        // HP Bar and Text side-by-side
                         mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           const Icon(
                             Icons.favorite,
                             color: Colors.redAccent,
                             size: 20,
-                          ), // Heart icon
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
-                            // Let progress bar take available space
                             child: ClipRRect(
-                              // Apply rounded corners
                               borderRadius: BorderRadius.circular(10),
                               child: LinearProgressIndicator(
                                 value: monsterHealth,
-                                minHeight: 18, // Increased height
-                                backgroundColor:
-                                    Colors.grey.shade800, // Darker background
+                                minHeight: 18,
+                                backgroundColor: Colors.grey.shade800,
                                 valueColor: AlwaysStoppedAnimation<Color>(
                                   Colors.redAccent.shade400,
-                                ), // Brighter red
+                                ),
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            // HP Percentage Text
                             '${(monsterHealth * 100).toStringAsFixed(0)}%',
                             style: TextStyle(
                               color: Colors.white.withOpacity(0.9),
@@ -584,28 +848,16 @@ class _GameplayScreenState extends State<GameplayScreen> {
                       ),
                     ],
                   ),
-
-                  // --- Middle Section: Monster Image ---
-                  // *** MODIFIED: Use Flexible and adjust height to prevent overflow ***
+                  // 中間：怪物圖片
                   Flexible(
-                    // <--- Added Flexible widget
                     child: Padding(
-                      // Keep the increased top padding to move image down
-                      padding: const EdgeInsets.only(
-                        top: 40.0,
-                        bottom: 10.0,
-                      ), // More space above
+                      padding: const EdgeInsets.only(top: 40.0, bottom: 10.0),
                       child: Image.asset(
                         currentMonster.imagePath,
-                        // *** MODIFIED: Reduced height (e.g., 480 or adjust as needed) ***
-                        height:
-                            480, // Adjusted monster size (was 640, original was 320)
+                        height: 480,
                         fit: BoxFit.contain,
-                        // TODO: Add monster idle/hit/death animations here (e.g., using AnimatedSwitcher or Rive)
                         errorBuilder: (context, error, stackTrace) {
-                          print(
-                            'Error loading monster image: ${currentMonster.imagePath} - $error',
-                          );
+                          print('Error loading monster image: $error');
                           return const Icon(
                             Icons.error_outline,
                             size: 100,
@@ -615,56 +867,51 @@ class _GameplayScreenState extends State<GameplayScreen> {
                       ),
                     ),
                   ),
-
-                  // --- Bottom Section: Interaction Area ---
+                  // 下方：題目、評分顯示與錄音按鈕
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Sentence Display
                       Container(
                         width: double.infinity,
-                        margin: const EdgeInsets.only(
-                          bottom: 15,
-                        ), // Space below sentence
+                        margin: const EdgeInsets.only(bottom: 15),
                         padding: const EdgeInsets.symmetric(
                           vertical: 16.0,
                           horizontal: 12.0,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(
-                            0.5,
-                          ), // Slightly darker semi-transparent bg
+                          color: Colors.black.withOpacity(0.5),
                           borderRadius: BorderRadius.circular(12.0),
                           border: Border.all(
                             color: Colors.blueGrey.shade700,
                             width: 1.5,
-                          ), // Subtle border
-                        ),
-                        child: Text(
-                          currentSentence,
-                          style: Theme.of(
-                            context,
-                          ).textTheme.headlineSmall?.copyWith(
-                            fontSize: 24,
-                            color: Colors.lightBlue.shade100,
                           ),
-                          textAlign: TextAlign.center,
                         ),
+                        child:
+                            _isLoadingSentences
+                                ? const CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                )
+                                : Text(
+                                  currentSentence,
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.headlineSmall?.copyWith(
+                                    fontSize: 24,
+                                    color: Colors.lightBlue.shade100,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
                       ),
-
-                      // Score Display Area (Shows after speaking)
+                      // 評分顯示區：當有分數時顯示 GPT 評分與回饋
                       AnimatedOpacity(
                         opacity: score > 0 ? 1.0 : 0.0,
                         duration: const Duration(milliseconds: 400),
                         child: Visibility(
-                          // Use Visibility to remove space when hidden
                           visible: score > 0,
-                          maintainAnimation: true, // Keep animations smooth
+                          maintainAnimation: true,
                           maintainState: true,
                           child: Container(
-                            margin: const EdgeInsets.only(
-                              bottom: 20,
-                            ), // Space below scores
+                            margin: const EdgeInsets.only(bottom: 20),
                             padding: const EdgeInsets.symmetric(
                               vertical: 8,
                               horizontal: 12,
@@ -674,11 +921,10 @@ class _GameplayScreenState extends State<GameplayScreen> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              // Display detailed scores
-                              "Pronunciation: $pronunciationScore / Fluency: $fluencyScore / Accuracy: $accuracyScore",
-                              style: TextStyle(
+                              "Score: $evaluationScore/10\nFeedback: $evaluationFeedback",
+                              style: const TextStyle(
                                 fontSize: 16,
-                                color: Colors.amberAccent.shade100,
+                                color: Colors.amberAccent,
                                 fontWeight: FontWeight.w500,
                               ),
                               textAlign: TextAlign.center,
@@ -686,59 +932,24 @@ class _GameplayScreenState extends State<GameplayScreen> {
                           ),
                         ),
                       ),
-
-                      // Speaking Button
+                      // 錄音按鈕
                       GestureDetector(
-                        // Use GestureDetector for tap/press states
                         onTapDown: (_) {
                           if (!isRecording) _startRecording();
-                        }, // Tap to start
-                        // onTapUp: (_) { _stopRecordingAndEvaluate(); }, // Optional: Tap again to stop early
-                        // onLongPressStart: (_) { if (!isRecording) _startRecording(); }, // Optional: Long press to start
-                        // onLongPressEnd: (_) { _stopRecordingAndEvaluate(); }, // Optional: Release long press to stop
+                        },
                         child: Container(
-                          padding: const EdgeInsets.all(
-                            18,
-                          ), // Larger padding makes the circle bigger
+                          padding: const EdgeInsets.all(18),
                           decoration: BoxDecoration(
                             color:
                                 isRecording
                                     ? Colors.redAccent.shade700
-                                    : Theme.of(context)
-                                            .elevatedButtonTheme
-                                            .style
-                                            ?.backgroundColor
-                                            ?.resolve(
-                                              {
-                                                MaterialState.pressed,
-                                                MaterialState.focused,
-                                                MaterialState.hovered,
-                                              },
-                                            ) ?? // More robust color resolution
-                                        Theme.of(context)
-                                            .colorScheme
-                                            .primary, // Use theme primary color
-                            shape: BoxShape.circle, // Make it circular
+                                    : Theme.of(context).colorScheme.primary,
+                            shape: BoxShape.circle,
                             boxShadow: [
-                              // Add a subtle glow/shadow
                               BoxShadow(
                                 color: (isRecording
                                         ? Colors.redAccent.shade700
-                                        : Theme.of(context)
-                                                .elevatedButtonTheme
-                                                .style
-                                                ?.backgroundColor
-                                                ?.resolve(
-                                                  {
-                                                    MaterialState.pressed,
-                                                    MaterialState.focused,
-                                                    MaterialState.hovered,
-                                                  },
-                                                ) // More robust color resolution
-                                                ??
-                                            Theme.of(context)
-                                                .colorScheme
-                                                .primary) // Use theme primary color
+                                        : Theme.of(context).colorScheme.primary)
                                     .withOpacity(0.5),
                                 blurRadius: 10,
                                 spreadRadius: 2,
@@ -746,49 +957,35 @@ class _GameplayScreenState extends State<GameplayScreen> {
                             ],
                           ),
                           child: Icon(
-                            // Mic icon inside the circle
                             isRecording
                                 ? Icons.mic_off_rounded
                                 : Icons.mic_rounded,
                             color:
                                 isRecording
                                     ? Colors.white
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .onPrimary, // Use theme color for contrast
-                            size: 35, // Icon size
+                                    : Theme.of(context).colorScheme.onPrimary,
+                            size: 35,
                           ),
-                          // TODO: Add voice wave animation around/inside the button when recording
                         ),
                       ),
-                      const SizedBox(height: 10), // Space below button
-                      // --- Placeholder for Timer/Animations ---
-                      // Example: A simple countdown bar placeholder
-                      // Container(height: 10, width: 150, color: Colors.grey.withOpacity(0.5), margin: const EdgeInsets.only(top: 15)),
-                      // Text("Timer placeholder", style: TextStyle(color: Colors.grey)),
-                      // TODO: Implement countdown timer bar or attack animation display area here
+                      const SizedBox(height: 10),
                     ],
                   ),
                 ],
               ),
             ),
           ),
-
-          // --- Layer 3 (Optional): Attack Animations / Damage Numbers ---
-          // TODO: Use Positioned or Align widgets here to overlay animations
-          // Example: Positioned(top: 150, left: 100, child: DamageNumberWidget(damage: 123))
         ],
       ),
     );
   }
 }
 
-// --- 5. 結算 (Results Screen) ---
+// 5. 結算畫面 (Results Screen)
 class ResultsScreen extends StatelessWidget {
   const ResultsScreen({super.key});
   @override
   Widget build(BuildContext context) {
-    // TODO: Receive and display actual results data
     return Scaffold(
       appBar: AppBar(
         title: const Text('挑戰完成'),
@@ -812,7 +1009,6 @@ class ResultsScreen extends StatelessWidget {
                 color: Colors.lightGreenAccent,
               ),
             ),
-            // TODO: Display more detailed results (average scores, stars etc.)
             const SizedBox(height: 60),
             ElevatedButton.icon(
               icon: const Icon(Icons.replay_rounded),
