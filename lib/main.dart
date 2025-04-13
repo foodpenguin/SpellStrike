@@ -13,6 +13,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:csv/csv.dart'; // <--- Import the CSV package
 
+
 /// 評分結果物件，包含評分（滿分10）與回饋內容
 class EvaluationResult {
   final int score; // 評分（0~10）
@@ -301,6 +302,7 @@ class MonsterInfo {
 }
 
 // 建立全域怪物資料
+
 final Map<String, MonsterInfo> monsters = {
   'Glumburn': MonsterInfo(
     name: 'Glumburn (哀焰獸)',
@@ -436,11 +438,15 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
+
+
 class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+
     _audioRecorder.initRecorder(); // 初始化錄音器
+
     Timer(const Duration(seconds: 3), () {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/home');
@@ -647,6 +653,7 @@ class _GameplayScreenState extends State<GameplayScreen> {
       _isLoadingSentences = true;
       currentSentence = "Loading sentences...";
     });
+
     try {
       // Load the single CSV file
       final String filePath =
@@ -658,6 +665,7 @@ class _GameplayScreenState extends State<GameplayScreen> {
       final List<List<dynamic>> csvTable = const CsvToListConverter().convert(
         csvData,
       );
+
 
       if (csvTable.isEmpty) {
         throw Exception("CSV file is empty.");

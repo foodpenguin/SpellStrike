@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_sound/flutter_sound.dart';
@@ -8,10 +9,12 @@ import 'package:http_parser/http_parser.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:async'; // 確保導入 dart:async
 
+
 class AudioRecorder {
   FlutterSoundRecorder? _recorder;
   bool _isRecording = false;
   String? _recordedFilePath;
+
 
   /// 初始化錄音器，並請求麥克風權限
   Future<void> initRecorder() async {
@@ -204,6 +207,7 @@ class AudioRecorder {
     return _recordedFilePath;
   }
 
+
   // 判斷是否正在錄音
   bool get isRecording => _isRecording;
 
@@ -211,4 +215,5 @@ class AudioRecorder {
   void dispose() {
     _recorder?.closeRecorder();
   }
+
 }

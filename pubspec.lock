@@ -175,7 +175,9 @@ packages:
     source: hosted
     version: "5.0.0"
   flutter_sound:
+
     dependency: "direct main"
+
     description:
       name: flutter_sound
       sha256: ef89477f6e8ce2fa395158ebc4a8b11982e3ada440b4021c06fd97a4e771554b
@@ -322,6 +324,7 @@ packages:
     version: "1.9.1"
   path_provider:
     dependency: "direct main"
+
     description:
       name: path_provider
       sha256: "50c5dd5b6e1aaf6fb3a78b33f6aa3afca52bf903a8a5298f53101fdaee55bbcd"
@@ -369,7 +372,9 @@ packages:
     source: hosted
     version: "2.3.0"
   permission_handler:
+
     dependency: "direct main"
+
     description:
       name: permission_handler
       sha256: "59adad729136f01ea9e35a48f5d1395e25cba6cea552249ddbe9cf950f5d7849"
