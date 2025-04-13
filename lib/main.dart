@@ -3,11 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async'; // 用於 Splash Screen 的計時器
 import 'dart:math'; // 用於隨機選擇怪物
-import 'services/recording.dart';  // 引用錄音功能
-import 'services/whisper.dart';  // 語音轉文字
+import 'services/recording.dart'; // 引用錄音功能
+import 'services/whisper.dart'; // 語音轉文字
 import 'services/soundplayer.dart'; // 播放音檔
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load();
   runApp(const SpellStrikeApp());
 }
 
@@ -23,9 +26,6 @@ class MonsterInfo {
 AudioRecorder _audioRecorder = AudioRecorder(); //創建錄音器物件
 late WhisperService _whisperService; // 創建錄音轉文字物件
 AudioPlayerService _audioPlayer = AudioPlayerService(); // 創建音檔播放器物件
-
-
-
 
 // 定義怪物資料
 final Map<String, MonsterInfo> monsters = {
@@ -156,13 +156,11 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-
-
 class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _audioRecorder.initRecorder();  // 初始化錄音器
+    _audioRecorder.initRecorder(); // 初始化錄音器
     _whisperService = WhisperService(); // 初始化語音轉文字功能
     _audioPlayer.initPlayer(); // 初始化音檔播放器
     Timer(const Duration(seconds: 3), () {
@@ -417,13 +415,9 @@ class _GameplayScreenState extends State<GameplayScreen> {
       _whisperService.transcribeAudioAndSave(File(path));
       print("音源已轉成文字檔");
       _audioPlayer.play(path);
-    }
-    else{
+    } else {
       print("沒有音檔");
     }
-
-
-
 
     if (!mounted) return;
 

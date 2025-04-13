@@ -30,6 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_dotenv: ^5.1.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -69,6 +70,8 @@ flutter:
   # <--- 加入或修改 assets 部分 --->
   assets:
     - assets/images/ # 這樣會包含 assets/images/ 下的所有檔案
+    - .env # 這樣會包含 .env 檔案
+    - assets/sounds/ # 這樣會包含 assets/sounds/ 下的所有檔案
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -22,10 +22,7 @@ class AudioRecorder {
     final dir = await getTemporaryDirectory();
     String path = '${dir.path}/voice_record.aac';
 
-    await _recorder!.startRecorder(
-      toFile: path,
-      codec: Codec.aacADTS,
-    );
+    await _recorder!.startRecorder(toFile: path, codec: Codec.aacADTS);
 
     _isRecording = true;
     _recordedFilePath = path;
