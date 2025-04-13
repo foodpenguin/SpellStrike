@@ -1,66 +1,65 @@
-# spell_strike
+# 🧙‍♂️ Spell Strike - 遊戲機制說明
 
-A new Flutter project.
+《Spell Strike》是一款結合**語音發音訓練**與**魔法打怪遊戲**的教育型冒險遊戲，強調 **魔法 + 衝擊力** 的視覺與互動風格。
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## 🎮 核心玩法（Core Gameplay）
 
-A few resources to get you started if this is your first Flutter project:
+- **說話攻擊**：玩家需朗讀螢幕上的英文句子，藉由語音辨識進行攻擊。
+- **AI 評分機制**：依照玩家發音的準確度、流暢度、清晰度進行多維度評分。
+- **分數轉化傷害**：語音得分直接影響怪物受傷數值，支援爆擊 / Miss 等特效。
+- **限時挑戰模式**：部分關卡要求玩家在限定秒數內完成朗讀。
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🗺️ 遊戲流程與模式（Game Flow）
 
-Hi
+1. **主畫面**
+   - 點擊「開始冒險」進入關卡選擇。
+   - 可進入詞庫管理、自訂主題、查看排行榜與遊戲設定。
 
-114/04/11 2:50PM 更新
-在pubspec.yaml中新增了錄音和請求權限的插件
-新增了lib\services\recording.dart
-在main.dart中導入、創建、初始化錄音器(_audioRecorder)
-android\app\build.gradle.kts中的 minSdk從flutter.minSdkVersion改為24，因為flutter_sound插件不支援原本的21版本
-錄音檔位置：/data/user/0/com.example.spell_strike/cache/，recording.dart中有對應獲取位址的功能
+2. **選題模式**
+   - 選擇句子主題（如旅遊、日常、商務）。
+   - 系統會隨機或手動抽選句子進入打怪。
 
+3. **打怪模式**
+   - 怪物出現於魔法陣中央。
+   - 玩家需唸出指定句子，並等待 AI 評分。
+   - 分數會化為傷害攻擊怪物。
+   - Combo 機制與倒數計時增加挑戰感。
+   - 怪物血量歸零即成功過關。
 
-114/04/11 9:12PM 更新
-新增了lib\services\whisper.dart
-在main.dart中導入、創建、初始化與語音轉文字的工具(_whisperService)
-文字檔位置：/data/user/0/com.example.spell_strike/app_flutter/transcription.txt，whisper.dart中有對應獲取位址的功能
-我有試試看時間戳記的功能，不過免費API好像沒此功能，所以就沒加了
-我只有試過whisper large v3和其turbo版，感覺兩者跑起來速度差不多，但非turbo版的精準度比較高
-使用前記得去whisper.dart更改apiKey，hugging face的金鑰獲取方法寫在最下面
-我還有新增播放剛錄製的音檔的功能，主要是為了測試錄音功能正常，不需要刪掉就行
+4. **結算畫面**
+   - 顯示本次總得分與每句評分細項。
+   - 可重播唸錯句子、觀看錯誤分析。
 
-步驟 1：註冊或登錄 Hugging Face 帳戶
-開啟瀏覽器，前往 Hugging Face 官方網站：https://huggingface.co。
-註冊帳戶（如果尚未註冊）：
-點擊右上角的 Sign Up（註冊）按鈕。
-輸入你的電子郵件地址、設置密碼，或選擇使用 GitHub/Google 帳戶快速註冊。
-完成電子郵件驗證（如果需要，檢查你的收件箱或垃圾郵件資料夾）。
-登錄帳戶（如果已有帳戶）：
-點擊右上角的 Log In（登錄），輸入你的電子郵件和密碼，或使用 GitHub/Google 登錄。
-步驟 2：進入個人資料設置
-登錄後，點擊右上角的個人頭像（通常是你的用戶名或頭像圖標）。
-在下拉選單中，選擇 Settings（設置）。
-步驟 3：訪問 API 密鑰頁面
-在設置頁面中，找到側邊欄（或頁面選項）中的 Access Tokens（訪問令牌）選項，點擊進入。
-如果你看不到這個選項，確保你已經登錄，並檢查是否在正確的設置頁面。
-步驟 4：創建新的 API 密鑰
-在 Access Tokens 頁面，你會看到一個名為 New Token（新建令牌）或 Create a token（創建令牌）的按鈕，點擊它。
-設置密鑰名稱：
-為你的密鑰取一個容易識別的名稱（例如 speech-to-text-test），這有助於你管理多個密鑰。
-選擇權限：
-選擇 Read（讀取）權限即可，這對於使用 Inference API 進行試用（如語音轉文字）已經足夠。
-如果你計劃上傳模型或數據集，則可能需要 Write（寫入）權限，但目前試用語音轉文字不需要。
-點擊 Create（創建）或確認按鈕。
-步驟 5：複製 API 密鑰
-創建成功後，你會看到一個新的 API 密鑰（一串以 hf_ 開頭的字串，例如 hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx）。
-立即複製密鑰：
-點擊密鑰旁邊的「複製」圖標，或手動選中並複製。
-注意：Hugging Face 可能只顯示一次完整密鑰，關閉頁面後你可能無法再次看到完整密鑰（但可以重新生成）。
+---
 
+## 🧠 評分與糾錯（Scoring & Feedback）
 
-使用前記得去whisper.dart更改apiKey
+| 評分面向     | 說明                                    |
+|--------------|-----------------------------------------|
+| Accuracy     | 發音準確程度                             |
+| Pronunciation| 母音/子音是否正確                        |
+| Fluency      | 是否流暢、有節奏                         |
+| Combo        | 連續高分唸對句子時，給予額外加成傷害     |
+| Error Hint   | 唸錯時提示錯誤音節，並提供修正建議        |
+
+---
+
+## 🧩 額外遊戲化元素（Gamification）
+
+- 🎯 **排行榜**：比較分數與 Combo 次數。
+- 🏅 **挑戰任務**：如「連續唸對 5 句」、「10 秒內完成」等。
+- 🧙‍♀️ **角色扮演**：可選擇魔法師造型與裝備（未來擴充）。
+- 🔓 **解鎖劇情**：透過成功闖關推進故事發展（選配功能）。
+- 💬 **自由練習模式**：不打怪、僅專注唸句練習。
+
+---
+
+## 🎨 美術與風格設定（Art Style）
+
+- 主題：中世紀魔法、冒險學院
+- 色調：藍紫色系、發光符文、魔法粒子
+- 元素：魔法書、浮空咒陣
